@@ -231,9 +231,15 @@ def _draw_header(draw, section: Section, width: int) -> int:
         draw.text((width - 96 - text_w - 22, y + 14), section.footer.upper(), font=chip_font, fill=ACCENT)
 
     heading_font = FONTS.get("bold", 62)
-    for line in _wrap(draw, section.heading, heading_font, width - 480)[:2]:
+    heading_size = 62
+    for heading_size in (62, 54, 48, 42, 38):
+        heading_font = FONTS.get("bold", heading_size)
+        heading_lines = _wrap(draw, section.heading, heading_font, width - 480)
+        if len(heading_lines) <= 2:
+            break
+    for line in heading_lines[:2]:
         draw.text((x, y), line, font=heading_font, fill=FG)
-        y += 74
+        y += int(heading_size * 1.2)
     if section.subheading:
         sub_font = FONTS.get("sans", 34)
         draw.text((x, y + 4), section.subheading, font=sub_font, fill=MUTED)
@@ -449,7 +455,7 @@ def render_section(section: Section, width: int, height: int) -> Image.Image:
 
 
 def render_all(script: VideoScript, out_dir: Path, width: int = 1920, height: int = 1080) -> list[Path]:
-    FONTS.set_language(script.language)
+    FONTS.set_language(script.slide_language)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for section in script.sections:

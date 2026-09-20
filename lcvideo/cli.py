@@ -28,15 +28,20 @@ def run(args: argparse.Namespace) -> int:
     if args.language:
         cfg.language = normalize_language(args.language)
         cfg.voice = default_voice(cfg.language)
+    if args.slide_language:
+        cfg.slide_language = normalize_language(args.slide_language)
     if args.voice:
         cfg.voice = args.voice
     # Keep per-language renders side by side rather than overwriting each other.
-    cfg.images_dir = cfg.images_dir / cfg.language
+    cfg.images_dir = cfg.images_dir / cfg.slide_language
     cfg.audio_dir = cfg.audio_dir / cfg.language
     cfg.ensure_dirs()
     stages = set(args.stages or STAGES)
 
-    print(f"Language: {LANGUAGES[cfg.language]['name']} ({cfg.language})  Voice: {cfg.voice}")
+    print(
+        f"Narration: {LANGUAGES[cfg.language]['name']} ({cfg.voice})  "
+        f"Slides: {LANGUAGES[cfg.slide_language]['name']}"
+    )
     script_path = cfg.script_dir / f"script.{cfg.language}.json"
 
     if "script" in stages:
@@ -57,8 +62,13 @@ def run(args: argparse.Namespace) -> int:
         _step("Writing narration script")
         script = build_script(problem, sol, llm=llm)
         if cfg.language != "en":
-            _step(f"Translating to {LANGUAGES[cfg.language]['name']}")
-            script = localize(script, get_translator(cfg.language))
+            what = "narration and slides" if cfg.slide_language != "en" else "narration"
+            _step(f"Translating {what} to {LANGUAGES[cfg.language]['name']}")
+            script = localize(
+                script,
+                get_translator(cfg.language),
+                translate_slides=cfg.slide_language == cfg.language,
+            )
         json_path, md_path = save_script(script, cfg.script_dir)
         print(f"    {json_path}\n    {md_path}")
     else:
@@ -110,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
         "-l", "--language",
         choices=["en", "english", "hi", "hindi"],
         help="narration language (default: from input.yaml)",
+    )
+    parser.add_argument(
+        "--slide-language",
+        choices=["en", "english", "hi", "hindi"],
+        help="language for on-slide text (default: English)",
     )
     parser.add_argument("--voice", help="override the Piper voice name")
     parser.add_argument(

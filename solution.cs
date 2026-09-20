@@ -1,176 +1,98 @@
 /*
-Title: 1622. Fancy Sequence
-Solution: https://leetcode.com/problems/fancy-sequence/solutions/7650344/simplest-solution-c-time-olog-n-space-on-y3cr/
+Title: 3013. Divide an Array Into Subarrays With Minimum Cost II
+Solution: https://leetcode.com/problems/divide-an-array-into-subarrays-with-minimum-cost-ii/solutions/7544900/simplest-solution-c-time-on-logdist-spac-yyjb/
 Difficulty: Hard
-Approach: Modular Arithmetic with Lazy Propagation - store transformation coefficients instead of updating all elements
-Tags: Array, Math, Modular Arithmetic
-1) Represent each element as a transformed value: real_value = a * stored_value + b
-2) Instead of updating all elements, only update the global transformation coefficients a and b
-3) For append(val), calculate the normalized stored value using modular inverse: stored = (val - b) * a^(-1) % MOD
-4) For addAll(inc), only increment b since value = a*x + (b + inc)
-5) For multAll(m), multiply both a and b since value = m*(a*x + b) = (a*m)*x + (b*m)
-6) For getIndex(idx), apply the transformation: return (a * stored + b) % MOD
-7) Use Fermat's Little Theorem for modular inverse: a^(-1) = a^(MOD-2) % MOD
+Approach: Sliding Window with Two Sorted Sets
+Tags: Array, Sliding Window, Heap (Priority Queue), Greedy
+1) First element must be included in the first subarray (fixed constraint).
+2) We need to select k-1 elements from a sliding window of size dist+1 to minimize sum.
+3) Use two sorted sets: kMinimum (holds k-1 smallest elements) and remaining (holds larger elements).
+4) Each element is stored as [value, index] to handle duplicates and maintain order.
+5) Build the first window [1...dist+1], adding elements to kMinimum.
+6) If kMinimum exceeds k-1 size, move the largest element to remaining set.
+7) Slide the window through the array, adding new elements and removing expired ones.
+8) When removing expired element, if it's in kMinimum, promote smallest from remaining.
+9) Track minimum sum across all windows and return nums[0] + minimum sum.
 
-Time Complexity: O(log n) per operation due to modular exponentiation
-Space Complexity: O(n) for storing the normalized values
-Tip: The key insight is lazy evaluation - instead of updating millions of elements for addAll/multAll operations, maintain transformation coefficients (a,b) and apply them only when retrieving values. This trades O(n) updates for O(1) coefficient updates and O(log n) modular exponentiation during append/getIndex.
-Similar Problems: 1157. Online Majority Element In Subarray, 1618. Maximum Font to Fit a Sentence in a Screen
+Time Complexity: O(n * log(dist)) where n = nums.length (each operation on sorted set is O(log size))
+Space Complexity: O(dist) for storing elements in the two sorted sets
+Tip: The key insight is maintaining two sorted sets to efficiently track the k-1 smallest elements in a sliding window. When an element expires from the window, we can quickly determine if we need to promote an element from remaining to kMinimum.
+Similar Problems: 239. Sliding Window Maximum, 480. Sliding Window Median, 3010. Divide an Array Into Subarrays With Minimum Cost I
 */
-using System;
-using System.Collections.Generic;
-
-public class Fancy
-{
-    /*
-    Key Idea - Lazy Propagation with Transformation Coefficients:
-    Instead of updating every element when addAll or multAll is called,
-    we store elements in a transformed form using two coefficients.
-
-    Every real value in the sequence is represented as:
-        real_value = a * stored_value + b
-
-    where:
-        a -> multiplication factor (initially 1)
-        b -> addition factor (initially 0)
-
-    This allows O(1) addAll and multAll operations while maintaining accuracy.
-    We only calculate the real value when needed (during getIndex).
-    */
-
-    private const long MOD = 1000000007;                          // Prime modulus for all arithmetic operations
-
-    // Stored normalized values - each value is stored in their base form
-    private List<long> vals = new List<long>();
-
-    // Global transformation coefficients - represent the current transformation state
-    private long a = 1;                                           // Multiplication factor
-    private long b = 0;                                           // Addition factor
-
-    /*
-    append(val) - Add a value to the sequence in its normalized form
-
-    We need to store the value in normalized form such that:
-        val = a * stored + b
-
-    Solving for stored:
-        stored = (val - b) / a
-
-    Since division under modulo is not allowed, we use modular inverse:
-        stored = (val - b) * a^(MOD-2) % MOD (by Fermat's Little Theorem)
-
-    Example:
-    Suppose a = 2, b = 3, and we append(11)
-    11 = 2*x + 3
-    x = (11 - 3) / 2 = 4
-    So we store normalized value 4, and when retrieved: 2*4 + 3 = 11
-    */
-
-    public void Append(int val)
-    {
-        // Subtract current addition factor from the value to normalize
-        long x = (val - b + MOD) % MOD;
-
-        // Calculate modular inverse of 'a' to perform division under modulo
-        // normalized = x / a = x * a^(MOD-2) % MOD
-        long normalized = (x * ModPow(a, MOD - 2)) % MOD;
-
-        // Store the normalized value
-        vals.Add(normalized);
+public class Solution {
+    // Custom comparer for sorting by value first, then by index
+    private class ValueIndexComparer : IComparer<(int value, int index)> {
+        public int Compare((int value, int index) a, (int value, int index) b) {
+            if (a.value != b.value)                                 // If values are different, compare by value
+                return a.value.CompareTo(b.value);
+            return a.index.CompareTo(b.index);                      // If values are same, compare by index to handle duplicates
+        }
     }
 
-    /*
-    addAll(inc) - Add a value to all elements (only update the addition factor)
+    public long MinimumCost(int[] nums, int k, int dist) {
+        int n = nums.Length;                                        // Get array length
 
-    Current transformation formula:
-        value = a * x + b
+        // SortedSet to maintain k-1 smallest elements in current window
+        SortedSet<(int value, int index)> kMinimum = new SortedSet<(int value, int index)>(new ValueIndexComparer());
 
-    After adding inc to all elements:
-        value = a * x + (b + inc)
+        // SortedSet to maintain remaining larger elements in current window
+        SortedSet<(int value, int index)> remaining = new SortedSet<(int value, int index)>(new ValueIndexComparer());
 
-    Notice that only the addition factor b changes - no need to update stored values!
-    This is the power of lazy propagation.
-    */
+        long sum = 0;                                               // Sum of k-1 smallest elements in current window
+        int i = 1;                                                  // Start from index 1 (index 0 is fixed)
 
-    public void AddAll(int inc)
-    {
-        // Update the global addition factor by the increment
-        b = (b + inc) % MOD;
-    }
+        // Build first window [1 ... dist+1]
+        while (i < n && i - dist < 1) {                             // Continue while within first window range
+            var cur = (nums[i], i);                                 // Create tuple with current value and index
+            kMinimum.Add(cur);                                      // Add current element to kMinimum set
+            sum += nums[i];                                         // Add current value to sum
 
-    /*
-    multAll(m) - Multiply all elements by a factor (update both coefficients)
+            if (kMinimum.Count > k - 1) {                           // If kMinimum has more than k-1 elements
+                var largest = kMinimum.Max;                         // Get the largest element in kMinimum
+                kMinimum.Remove(largest);                           // Remove it from kMinimum
+                sum -= largest.value;                               // Subtract its value from sum
+                remaining.Add(largest);                             // Add it to remaining set
+            }
+            i++;                                                    // Move to next index
+        }
 
-    Current transformation formula:
-        value = a * x + b
+        long result = long.MaxValue;                                // Initialize result with maximum value
 
-    After multiplying all elements by m:
-        value = m * (a * x + b)
-              = (a * m) * x + (b * m)
+        // Sliding window from dist+2 onwards
+        while (i < n) {                                             // Continue until end of array
+            var cur = (nums[i], i);                                 // Create tuple with current value and index
+            kMinimum.Add(cur);                                      // Add current element to kMinimum
+            sum += nums[i];                                         // Add current value to sum
 
-    Both multiplication factor a and addition factor b must be updated.
-    */
+            if (kMinimum.Count > k - 1) {                           // If kMinimum has more than k-1 elements
+                var largest = kMinimum.Max;                         // Get the largest element in kMinimum
+                kMinimum.Remove(largest);                           // Remove it from kMinimum
+                sum -= largest.value;                               // Subtract its value from sum
+                remaining.Add(largest);                             // Add it to remaining set
+            }
 
-    public void MultAll(int m)
-    {
-        // Both coefficients are multiplied by the factor m
-        a = (a * m) % MOD;                                        // Update multiplication factor
-        b = (b * m) % MOD;                                        // Update addition factor
-    }
+            result = Math.Min(result, sum);                         // Update result with minimum sum found so far
 
-    /*
-    getIndex(idx) - Retrieve the actual value at index by applying transformation
+            // Remove expired index (element at i - dist)
+            int remIdx = i - dist;                                  // Calculate index of element to remove (outside window)
+            var toRemove = (nums[remIdx], remIdx);                  // Create tuple for element to remove
 
-    Apply the transformation formula to the stored normalized value:
-        Real value = a * stored + b
+            if (kMinimum.Remove(toRemove)) {                        // Try to remove from kMinimum; if successful
+                sum -= nums[remIdx];                                // Subtract removed value from sum
 
-    Example:
-        stored = 4, a = 2, b = 3
-        Real value = 2*4 + 3 = 11
+                if (remaining.Count > 0) {                          // If remaining set is not empty
+                    var promote = remaining.Min;                    // Get smallest element from remaining
+                    remaining.Remove(promote);                      // Remove it from remaining
+                    kMinimum.Add(promote);                          // Add it to kMinimum (promotion)
+                    sum += promote.value;                           // Add its value to sum
+                }
+            } else {                                                // If element was not in kMinimum
+                remaining.Remove(toRemove);                         // Remove it from remaining set instead
+            }
 
-    Return -1 if the index is out of bounds.
-    */
+            i++;                                                    // Move to next index
+        }
 
-    public int GetIndex(int idx)
-    {
-        // Validate index bounds
-        if (idx >= vals.Count)
-            return -1;                                            // Index out of range
-
-        // Apply transformation to retrieve the actual value
-        return (int)((a * vals[idx] + b) % MOD);
-    }
-
-    /*
-    ModPow(x, n) - Fast modular exponentiation using binary exponentiation
-    Used for calculating modular inverse via Fermat's Little Theorem
-
-    Fermat's Little Theorem (p is prime):
-        a^(p-1) ≡ 1 (mod p)
-        a^(p-2) ≡ a^(-1) (mod p)  [modular inverse]
-
-    Since MOD = 1000000007 is prime, we can use this to find a^(-1) = a^(MOD-2) % MOD
-    This is needed for division operations under modulo arithmetic.
-
-    Binary exponentiation reduces time complexity from O(n) to O(log n).
-    */
-
-    private long ModPow(long x, long n)
-    {
-        // Base case: x^0 = 1
-        if (n == 0)
-            return 1;
-
-        // Calculate x^(n/2) recursively (divide exponent by 2)
-        long half = ModPow(x, n / 2);
-
-        // Square the result: (x^(n/2))^2 = x^n (if n is even)
-        long result = (half * half) % MOD;
-
-        // If n is odd, multiply by x one more time: x^(n+1) = x^n * x
-        if (n % 2 == 1)
-            result = (result * x) % MOD;
-
-        return result;
+        return nums[0] + result;                                    // Return first element plus minimum sum of k-1 elements
     }
 }

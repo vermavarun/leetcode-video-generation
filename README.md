@@ -47,7 +47,8 @@ The Hindi run additionally pulls the Argos `en → hi` translation model, the
 ### 2a. Pick the language in `input.yaml`
 
 ```yaml
-language: english   # english | hindi   (or the codes en | hi)
+language: english         # narration / voice: english | hindi (or en | hi)
+slide-language: english   # text drawn on the slides: english | hindi
 ```
 
 ```bash
@@ -58,26 +59,38 @@ language: english   # english | hindi   (or the codes en | hi)
 
 ```bash
 ./.venv/bin/python -m lcvideo.cli --language english
-./.venv/bin/python -m lcvideo.cli --language hindi
+./.venv/bin/python -m lcvideo.cli --language hindi                          # Hindi voice, English slides
+./.venv/bin/python -m lcvideo.cli --language hindi --slide-language hindi   # Hindi voice and slides
 ```
+
+### Narration language vs slide language
+
+These are independent. `slide-language` defaults to **english** even when the narration is
+Hindi, because code, identifiers and complexity notation read better in English.
+
+| `language` | `slide-language` | Result |
+|---|---|---|
+| english | english | English voice, English slides |
+| hindi | english | **Hindi voice-over, English slides** (default for Hindi) |
+| hindi | hindi | Hindi voice-over, Devanagari slides |
 
 ### Generate both from one source file
 
 ```bash
-./.venv/bin/python -m lcvideo.cli -l english   # -> output/reverse-degree-of-a-string-en.mp4
-./.venv/bin/python -m lcvideo.cli -l hindi     # -> output/reverse-degree-of-a-string-hi.mp4
+./.venv/bin/python -m lcvideo.cli -l english   # -> output/fancy-sequence-en.mp4
+./.venv/bin/python -m lcvideo.cli -l hindi     # -> output/fancy-sequence-hi.mp4
 ```
 
-Each language gets its own script, slides, audio and MP4, so the two runs never
-overwrite each other.
+Audio is kept per narration language (`output/audio/<lang>/`) and slides per slide language
+(`output/images/<lang>/`), so runs never overwrite each other.
 
 ### What gets translated
 
-| Translated to Hindi | Kept in English |
+| Translated | Kept in English |
 |---|---|
 | Narration (voice-over) | Source code on the code slides |
-| Slide headings, bullets, section labels | Example inputs and outputs |
-| Problem statement, constraints, approach steps | Problem title and complexity formulas |
+| Slide text — only when `slide-language: hindi` | Example inputs and outputs |
+| Headings, bullets, section labels | Problem title and complexity formulas |
 
 Translation happens locally with Argos Translate (CTranslate2), and results are cached
 in `cache/translations/en-hi.json`. Edit that file to correct any wording — the
@@ -130,7 +143,8 @@ Solution-link: solution.cs
 Images-directory: output
 Video-directory: output
 voice: output
-language: english          # english | hindi
+language: english          # narration: english | hindi
+slide-language: english    # slide text: english | hindi
 ```
 
 Optional extra keys: `voice-name` (Piper voice), `width`, `height`, `fps`, `llm-file`.
@@ -199,7 +213,8 @@ text — useful for polishing machine-translated Hindi before rendering:
 | Flag | Meaning |
 |------|---------|
 | `-i, --input` | path to the input YAML (default `input.yaml`) |
-| `-l, --language` | `english` / `en` or `hindi` / `hi` |
+| `-l, --language` | narration language: `english` / `en` or `hindi` / `hi` |
+| `--slide-language` | on-slide text language (default English) |
 | `--voice` | override the Piper voice name |
 | `-s, --stage` | run only `script` / `images` / `voice` / `video`; repeatable |
 | `--offline` | no network access at all |

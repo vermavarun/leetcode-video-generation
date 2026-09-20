@@ -38,12 +38,14 @@ class VideoScript:
     subtitle: str
     sections: list[Section]
     language: str = "en"
+    slide_language: str = "en"
 
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "subtitle": self.subtitle,
             "language": self.language,
+            "slide_language": self.slide_language,
             "sections": [asdict(s) for s in self.sections],
         }
 
@@ -203,6 +205,8 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
     difficulty = problem.difficulty or sol.difficulty or "Unknown"
     topics = problem.topics or sol.tags
     display_title = f"{number}. {title}" if number else title
+    # The approach field often carries a trailing explanation; slides only need the name.
+    approach_name = re.split(r"\s[-\u2013:]\s", sol.approach or "", maxsplit=1)[0].strip()
 
     sections: list[Section] = []
 
@@ -216,8 +220,6 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
         return text if len(text) > 40 else default
 
     # 1. Title -------------------------------------------------------------
-    # The approach field often carries a trailing explanation; the slide only needs the name.
-    approach_name = re.split(r"\s[-\u2013:]\s", sol.approach or "", maxsplit=1)[0].strip()
     sections.append(
         Section(
             id="00-title",
@@ -297,7 +299,7 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
     if sol.steps:
         approach_sections = _bullet_sections(
             "04-approach",
-            sol.approach or "Approach",
+            approach_name or "Approach",
             sol.steps,
             "Solution",
             subheading="Step by step",
@@ -404,13 +406,18 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
     return VideoScript(title=display_title, subtitle=difficulty, sections=sections)
 
 
-def localize(script: VideoScript, translator) -> VideoScript:
-    """Translate spoken and on-slide prose. Code and example I/O stay verbatim."""
+def localize(script: VideoScript, translator, *, translate_slides: bool = False) -> VideoScript:
+    """Translate the narration, and optionally the on-slide prose too.
+
+    Code and example input/output always stay verbatim.
+    """
     if translator is None:
         return script
 
     for section in script.sections:
         section.narration = translator(section.narration)
+        if not translate_slides:
+            continue
         section.bullets = [translator(b) for b in section.bullets]
         section.footer = translator(section.footer)
         if section.kind != "title":
@@ -420,8 +427,10 @@ def localize(script: VideoScript, translator) -> VideoScript:
         # Only the row label is prose; the value is input/output or a formula.
         section.rows = [[translator(label), value] for label, value in section.rows]
 
-    script.subtitle = translator(script.subtitle)
     script.language = translator.target
+    if translate_slides:
+        script.subtitle = translator(script.subtitle)
+        script.slide_language = translator.target
     translator.flush()
     return script
 
@@ -445,5 +454,6 @@ def load_script(path: Path) -> VideoScript:
         title=data["title"],
         subtitle=data["subtitle"],
         language=data.get("language", "en"),
+        slide_language=data.get("slide_language", "en"),
         sections=[Section(**s) for s in data["sections"]],
     )

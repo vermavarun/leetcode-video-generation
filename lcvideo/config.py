@@ -49,6 +49,7 @@ class Config:
     video_dir: Path
     audio_dir: Path
     language: str = "en"
+    slide_language: str = "en"
     voice: str = DEFAULT_VOICE
     llm_file: str = DEFAULT_LLM_FILE
     width: int = 1920
@@ -99,6 +100,8 @@ def load_config(input_file: str | os.PathLike[str]) -> Config:
         audio_dir = _resolve(base, voice_value)
 
     language = normalize_language(norm.get("language", "en"))
+    # Slides default to English even for Hindi narration; code and identifiers read better that way.
+    slide_language = normalize_language(norm.get("slide_language", "en"))
     voice = norm.get("voice_name") or (voice_value if is_voice_name else default_voice(language))
 
     return Config(
@@ -108,6 +111,7 @@ def load_config(input_file: str | os.PathLike[str]) -> Config:
         video_dir=video_dir,
         audio_dir=audio_dir / "audio",
         language=language,
+        slide_language=slide_language,
         voice=str(voice),
         llm_file=str(norm.get("llm_file", DEFAULT_LLM_FILE)),
         width=int(norm.get("width", 1920)),
