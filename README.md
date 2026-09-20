@@ -74,6 +74,33 @@ Hindi, because code, identifiers and complexity notation read better in English.
 | hindi | english | **Hindi voice-over, English slides** (default for Hindi) |
 | hindi | hindi | Hindi voice-over, Devanagari slides |
 
+### Casual Hinglish vs formal Hindi
+
+Raw machine translation produces stiff, Sanskritised Hindi and mangles code names
+(`k` becomes "कश्मीर", `i` becomes "मैं"). The pipeline fixes both:
+
+- **Identifiers are masked** before translation and spoken back in Devanagari
+  (`nums` → नम्स, `dist` → डिस्ट, `k` → के). Names from your solution file are
+  picked up automatically.
+- **Operators are fixed phrases**, so `1 <= n <= 105` reads
+  "1 से छोटा या बराबर एन से छोटा या बराबर 105".
+- **Vocabulary is Hinglish**: सरणी → ऐरे, सूचकांक → इंडेक्स, बाधाएं → कंस्ट्रेंट्स,
+  यदि → अगर, का उपयोग करेंगे → यूज़ करेंगे.
+
+This is on by default. To get literal, formal Hindi instead:
+
+```yaml
+tone: formal   # casual (default) | formal
+```
+
+```bash
+./.venv/bin/python -m lcvideo.cli -l hindi --tone formal
+```
+
+The wording maps live in [lcvideo/hindi.py](lcvideo/hindi.py) — add your own terms there.
+Translations are cached in `cache/translations/en-hi-casual.json`; edit that file to
+correct any phrase and it is reused on the next run.
+
 ### Generate both from one source file
 
 ```bash
@@ -145,6 +172,7 @@ Video-directory: output
 voice: output
 language: english          # narration: english | hindi
 slide-language: english    # slide text: english | hindi
+tone: casual               # hindi wording: casual | formal
 ```
 
 Optional extra keys: `voice-name` (Piper voice), `width`, `height`, `fps`, `llm-file`.
@@ -215,6 +243,7 @@ text — useful for polishing machine-translated Hindi before rendering:
 | `-i, --input` | path to the input YAML (default `input.yaml`) |
 | `-l, --language` | narration language: `english` / `en` or `hindi` / `hi` |
 | `--slide-language` | on-slide text language (default English) |
+| `--tone` | `casual` (Hinglish, default) or `formal` |
 | `--voice` | override the Piper voice name |
 | `-s, --stage` | run only `script` / `images` / `voice` / `video`; repeatable |
 | `--offline` | no network access at all |

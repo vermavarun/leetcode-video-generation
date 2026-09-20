@@ -11,7 +11,7 @@ from .llm import load_llm
 from .problem import get_problem
 from .script_gen import build_script, load_script, localize, save_script
 from .slides import render_all
-from .solution import parse_solution
+from .solution import identifiers_in, parse_solution
 from .tts import duration, synthesize_script
 from .translate import get_translator
 from .video import build_video
@@ -30,6 +30,8 @@ def run(args: argparse.Namespace) -> int:
         cfg.voice = default_voice(cfg.language)
     if args.slide_language:
         cfg.slide_language = normalize_language(args.slide_language)
+    if args.tone:
+        cfg.tone = args.tone
     if args.voice:
         cfg.voice = args.voice
     # Keep per-language renders side by side rather than overwriting each other.
@@ -63,10 +65,14 @@ def run(args: argparse.Namespace) -> int:
         script = build_script(problem, sol, llm=llm)
         if cfg.language != "en":
             what = "narration and slides" if cfg.slide_language != "en" else "narration"
-            _step(f"Translating {what} to {LANGUAGES[cfg.language]['name']}")
+            _step(f"Translating {what} to {LANGUAGES[cfg.language]['name']} ({cfg.tone})")
             script = localize(
                 script,
-                get_translator(cfg.language),
+                get_translator(
+                    cfg.language,
+                    casual=cfg.tone != "formal",
+                    code_terms=identifiers_in(sol),
+                ),
                 translate_slides=cfg.slide_language == cfg.language,
             )
         json_path, md_path = save_script(script, cfg.script_dir)
@@ -125,6 +131,10 @@ def main(argv: list[str] | None = None) -> int:
         "--slide-language",
         choices=["en", "english", "hi", "hindi"],
         help="language for on-slide text (default: English)",
+    )
+    parser.add_argument(
+        "--tone", choices=["casual", "formal"],
+        help="Hindi wording style (default: casual, conversational Hinglish)",
     )
     parser.add_argument("--voice", help="override the Piper voice name")
     parser.add_argument(

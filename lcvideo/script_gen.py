@@ -415,7 +415,7 @@ def localize(script: VideoScript, translator, *, translate_slides: bool = False)
         return script
 
     for section in script.sections:
-        section.narration = translator(section.narration)
+        section.narration = translator(section.narration, speech=True)
         if not translate_slides:
             continue
         section.bullets = [translator(b) for b in section.bullets]

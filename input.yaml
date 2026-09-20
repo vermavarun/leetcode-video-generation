@@ -5,3 +5,4 @@ Video-directory: output
 voice: output
 language: hindi # english or hindi  (narration / voice)
 slide-language: english # english or hindi  (text drawn on the slides)
+tone: casual # casual (conversational Hinglish) or formal

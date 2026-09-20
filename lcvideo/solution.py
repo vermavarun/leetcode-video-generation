@@ -132,3 +132,18 @@ def parse_solution(path: str | Path) -> Solution:
 
 def code_lines(sol: Solution) -> list[str]:
     return sol.code.splitlines()
+
+
+_IDENTIFIER = re.compile(r"\b[A-Za-z_]\w*\b")
+# Words that are both code identifiers and ordinary English; translating them is fine.
+_COMMON_WORDS = {
+    "if", "else", "for", "while", "return", "class", "public", "private", "static",
+    "void", "int", "new", "this", "true", "false", "null", "string", "var", "let",
+    "const", "def", "self", "in", "is", "and", "or", "not", "the", "to", "of",
+}
+
+
+def identifiers_in(sol: Solution) -> set[str]:
+    """Names from the source that must survive translation verbatim."""
+    found = {n for n in _IDENTIFIER.findall(sol.code) if 3 <= len(n) <= 12}
+    return found - _COMMON_WORDS

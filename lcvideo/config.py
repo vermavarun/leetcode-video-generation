@@ -50,6 +50,7 @@ class Config:
     audio_dir: Path
     language: str = "en"
     slide_language: str = "en"
+    tone: str = "casual"
     voice: str = DEFAULT_VOICE
     llm_file: str = DEFAULT_LLM_FILE
     width: int = 1920
@@ -112,6 +113,7 @@ def load_config(input_file: str | os.PathLike[str]) -> Config:
         audio_dir=audio_dir / "audio",
         language=language,
         slide_language=slide_language,
+        tone=str(norm.get("tone", "casual")).strip().lower(),
         voice=str(voice),
         llm_file=str(norm.get("llm_file", DEFAULT_LLM_FILE)),
         width=int(norm.get("width", 1920)),
