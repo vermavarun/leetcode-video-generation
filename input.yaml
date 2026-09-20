@@ -3,3 +3,4 @@ Solution-link: solution.cs
 Images-directory: output
 Video-directory: output
 voice: output
+language: english # english or hindi

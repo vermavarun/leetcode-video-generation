@@ -6,13 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_config
+from .config import LANGUAGES, default_voice, load_config, normalize_language
 from .llm import load_llm
 from .problem import get_problem
-from .script_gen import build_script, load_script, save_script
+from .script_gen import build_script, load_script, localize, save_script
 from .slides import render_all
 from .solution import parse_solution
 from .tts import duration, synthesize_script
+from .translate import get_translator
 from .video import build_video
 
 STAGES = ["script", "images", "voice", "video"]
@@ -24,10 +25,19 @@ def _step(message: str) -> None:
 
 def run(args: argparse.Namespace) -> int:
     cfg = load_config(args.input)
+    if args.language:
+        cfg.language = normalize_language(args.language)
+        cfg.voice = default_voice(cfg.language)
+    if args.voice:
+        cfg.voice = args.voice
+    # Keep per-language renders side by side rather than overwriting each other.
+    cfg.images_dir = cfg.images_dir / cfg.language
+    cfg.audio_dir = cfg.audio_dir / cfg.language
     cfg.ensure_dirs()
     stages = set(args.stages or STAGES)
 
-    script_path = cfg.script_dir / "script.json"
+    print(f"Language: {LANGUAGES[cfg.language]['name']} ({cfg.language})  Voice: {cfg.voice}")
+    script_path = cfg.script_dir / f"script.{cfg.language}.json"
 
     if "script" in stages:
         _step("Parsing solution source")
@@ -46,6 +56,9 @@ def run(args: argparse.Namespace) -> int:
 
         _step("Writing narration script")
         script = build_script(problem, sol, llm=llm)
+        if cfg.language != "en":
+            _step(f"Translating to {LANGUAGES[cfg.language]['name']}")
+            script = localize(script, get_translator(cfg.language))
         json_path, md_path = save_script(script, cfg.script_dir)
         print(f"    {json_path}\n    {md_path}")
     else:
@@ -81,6 +94,7 @@ def run(args: argparse.Namespace) -> int:
         out_path = cfg.video_dir / f"{cfg.problem_link.rstrip('/').split('/')[-1] or 'solution'}.mp4"
         if out_path.name in {"description.mp4", ".mp4"}:
             out_path = cfg.video_dir / "solution.mp4"
+        out_path = out_path.with_name(f"{out_path.stem}-{cfg.language}.mp4")
         pairs = [(img, aud, dur) for img, (aud, dur) in zip(images, audio)]
         build_video(pairs, out_path, fps=cfg.fps, width=cfg.width, height=cfg.height)
         total = sum(d for _, d in audio)
@@ -92,6 +106,12 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lcvideo", description=__doc__)
     parser.add_argument("-i", "--input", default="input.yaml", help="pipeline input file")
+    parser.add_argument(
+        "-l", "--language",
+        choices=["en", "english", "hi", "hindi"],
+        help="narration language (default: from input.yaml)",
+    )
+    parser.add_argument("--voice", help="override the Piper voice name")
     parser.add_argument(
         "-s", "--stage", dest="stages", action="append", choices=STAGES,
         help="run only the given stage(s); repeatable",

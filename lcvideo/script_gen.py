@@ -34,11 +34,13 @@ class VideoScript:
     title: str
     subtitle: str
     sections: list[Section]
+    language: str = "en"
 
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "subtitle": self.subtitle,
+            "language": self.language,
             "sections": [asdict(s) for s in self.sections],
         }
 
@@ -354,15 +356,37 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
     return VideoScript(title=display_title, subtitle=difficulty, sections=sections)
 
 
+def localize(script: VideoScript, translator) -> VideoScript:
+    """Translate spoken and on-slide prose. Code and example I/O stay verbatim."""
+    if translator is None:
+        return script
+
+    for section in script.sections:
+        section.narration = translator(section.narration)
+        section.bullets = [translator(b) for b in section.bullets]
+        section.footer = translator(section.footer)
+        if section.kind != "title":
+            section.heading = translator(section.heading)
+        if section.subheading and section.kind not in {"title", "outro"}:
+            section.subheading = translator(section.subheading)
+        # Only the row label is prose; the value is input/output or a formula.
+        section.rows = [[translator(label), value] for label, value in section.rows]
+
+    script.subtitle = translator(script.subtitle)
+    script.language = translator.target
+    translator.flush()
+    return script
+
+
 def save_script(script: VideoScript, out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "script.json"
-    json_path.write_text(json.dumps(script.to_dict(), indent=2), encoding="utf-8")
+    json_path = out_dir / f"script.{script.language}.json"
+    json_path.write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
     md_lines = [f"# {script.title}", f"_{script.subtitle}_", ""]
     for section in script.sections:
         md_lines += [f"## {section.heading}", "", section.narration, ""]
-    md_path = out_dir / "script.md"
+    md_path = out_dir / f"script.{script.language}.md"
     md_path.write_text("\n".join(md_lines), encoding="utf-8")
     return json_path, md_path
 
@@ -372,5 +396,6 @@ def load_script(path: Path) -> VideoScript:
     return VideoScript(
         title=data["title"],
         subtitle=data["subtitle"],
+        language=data.get("language", "en"),
         sections=[Section(**s) for s in data["sections"]],
     )

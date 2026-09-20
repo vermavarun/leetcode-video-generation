@@ -12,7 +12,14 @@ if [[ ! -d .venv ]]; then
   ./.venv/bin/pip install -r requirements.txt
 fi
 
-if [[ ! -f models/piper/en_US-lessac-medium.onnx ]]; then
+LANG_ARG="en"
+case " $* " in
+  *" hindi "*|*" hi "*) LANG_ARG="hi" ;;
+esac
+if [[ "$LANG_ARG" == "hi" && ! -f models/piper/hi_IN-pratham-medium.onnx ]]; then
+  echo "==> Downloading Hindi models (one time)"
+  ./.venv/bin/python scripts/setup_models.py --language hindi
+elif [[ ! -f models/piper/en_US-lessac-medium.onnx ]]; then
   echo "==> Downloading models (one time)"
   ./.venv/bin/python scripts/setup_models.py
 fi

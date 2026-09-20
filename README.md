@@ -1,17 +1,18 @@
 # LeetCode Explanation Video Pipeline
 
 Give it a LeetCode problem link plus your annotated solution file, and it produces a
-narrated 1080p MP4 walkthrough — script, slides, voice-over, and final video.
+narrated 1080p MP4 walkthrough — script, slides, voice-over, and final video, in
+**English or Hindi**.
 
 Everything after a one-time model download runs **fully offline** on open-source models.
 
 ```
 input.yaml + solution.cs
         │
-        ├─ script   → output/script.json, output/script.md
-        ├─ images   → output/images/*.png          (Pillow + Pygments)
-        ├─ voice    → output/audio/*.wav           (Piper neural TTS, on-device)
-        └─ video    → output/<slug>.mp4            (ffmpeg)
+        ├─ script   → output/script.<lang>.json, output/script.<lang>.md
+        ├─ images   → output/images/<lang>/*.png   (Pillow + Pygments)
+        ├─ voice    → output/audio/<lang>/*.wav    (Piper neural TTS, on-device)
+        └─ video    → output/<slug>-<lang>.mp4     (ffmpeg)
 ```
 
 ## Setup
@@ -26,18 +27,85 @@ Or manually:
 ```bash
 python3.12 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-./.venv/bin/python scripts/setup_models.py          # ~63 MB Piper voice
+./.venv/bin/python scripts/setup_models.py                    # English assets (~63 MB)
+./.venv/bin/python scripts/setup_models.py --language hindi   # Hindi assets (~200 MB)
 ./.venv/bin/python -m lcvideo.cli
 ```
+
+## Language: English and Hindi
+
+### 1. Download the assets for the language (once)
+
+```bash
+./.venv/bin/python scripts/setup_models.py --language english
+./.venv/bin/python scripts/setup_models.py --language hindi
+```
+
+The Hindi run additionally pulls the Argos `en → hi` translation model, the
+`hi_IN-pratham-medium` Piper voice, and Noto Sans Devanagari for the slides.
+
+### 2a. Pick the language in `input.yaml`
+
+```yaml
+language: english   # english | hindi   (or the codes en | hi)
+```
+
+```bash
+./.venv/bin/python -m lcvideo.cli
+```
+
+### 2b. Or override per run from the command line
+
+```bash
+./.venv/bin/python -m lcvideo.cli --language english
+./.venv/bin/python -m lcvideo.cli --language hindi
+```
+
+### Generate both from one source file
+
+```bash
+./.venv/bin/python -m lcvideo.cli -l english   # -> output/reverse-degree-of-a-string-en.mp4
+./.venv/bin/python -m lcvideo.cli -l hindi     # -> output/reverse-degree-of-a-string-hi.mp4
+```
+
+Each language gets its own script, slides, audio and MP4, so the two runs never
+overwrite each other.
+
+### What gets translated
+
+| Translated to Hindi | Kept in English |
+|---|---|
+| Narration (voice-over) | Source code on the code slides |
+| Slide headings, bullets, section labels | Example inputs and outputs |
+| Problem statement, constraints, approach steps | Problem title and complexity formulas |
+
+Translation happens locally with Argos Translate (CTranslate2), and results are cached
+in `cache/translations/en-hi.json`. Edit that file to correct any wording — the
+corrections are reused on the next run.
+
+### Picking a different voice
+
+| Language | Voices |
+|---|---|
+| English | `en_US-lessac-medium` (default), `en_US-amy-medium`, `en_US-ryan-high`, `en_GB-alba-medium` |
+| Hindi | `hi_IN-pratham-medium` (default), `hi_IN-priyamvada-medium` |
+
+```bash
+./.venv/bin/python scripts/setup_models.py --language hindi --voice hi_IN-priyamvada-medium
+./.venv/bin/python -m lcvideo.cli -l hindi --voice hi_IN-priyamvada-medium
+```
+
+You can also set it permanently in `input.yaml` with `voice-name: hi_IN-priyamvada-medium`.
 
 ## Models
 
 | Role | Model | License | Size | Required |
 |------|-------|---------|------|----------|
-| Text-to-speech | Piper `en_US-lessac-medium` | MIT | 63 MB | yes |
+| Text-to-speech (English) | Piper `en_US-lessac-medium` | MIT | 63 MB | yes |
+| Text-to-speech (Hindi) | Piper `hi_IN-pratham-medium` | MIT | 64 MB | for Hindi |
+| Translation | Argos Translate `en → hi` | MIT | ~130 MB | for Hindi |
+| Devanagari font | Noto Sans Devanagari | OFL | 0.6 MB | for Hindi |
 | Script writing | Qwen2.5-3B-Instruct (GGUF, Q4_K_M) | Apache-2.0 | ~2 GB | optional |
-
-Other voices: `--voice en_US-amy-medium`, `en_US-ryan-high`, `en_GB-alba-medium`.
 
 ### Optional LLM narration
 
@@ -62,6 +130,7 @@ Solution-link: solution.cs
 Images-directory: output
 Video-directory: output
 voice: output
+language: english          # english | hindi
 ```
 
 Optional extra keys: `voice-name` (Piper voice), `width`, `height`, `fps`, `llm-file`.
@@ -116,13 +185,22 @@ GraphQL API, and it is cached under `cache/problems/<slug>.json` on first run.
 ./.venv/bin/python -m lcvideo.cli -s images -s video # re-render slides and re-encode
 ```
 
-Edit `output/script.json` by hand between stages to tweak any narration or slide text.
+Edit `output/script.<lang>.json` by hand between stages to tweak any narration or slide
+text — useful for polishing machine-translated Hindi before rendering:
+
+```bash
+./.venv/bin/python -m lcvideo.cli -l hindi -s script     # produce output/script.hi.json
+#  ... edit output/script.hi.json ...
+./.venv/bin/python -m lcvideo.cli -l hindi -s images -s voice -s video
+```
 
 ## Flags
 
 | Flag | Meaning |
 |------|---------|
 | `-i, --input` | path to the input YAML (default `input.yaml`) |
+| `-l, --language` | `english` / `en` or `hindi` / `hi` |
+| `--voice` | override the Piper voice name |
 | `-s, --stage` | run only `script` / `images` / `voice` / `video`; repeatable |
 | `--offline` | no network access at all |
 | `--refresh` | re-fetch the problem statement |

@@ -3,3 +3,4 @@ pillow>=11.0
 pygments>=2.18
 requests>=2.32
 piper-tts>=1.8.0
+argostranslate>=1.9

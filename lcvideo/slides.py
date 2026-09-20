@@ -38,6 +38,19 @@ MONO_CANDIDATES = [
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
 ]
 
+# Devanagari needs a script-specific face; these also cover Latin text.
+DEVANAGARI_CANDIDATES = [
+    MODELS_DIR / "fonts" / "NotoSansDevanagari.ttf",
+    Path("/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc"),
+    Path("/System/Library/Fonts/Supplemental/DevanagariMT.ttc"),
+    Path("/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf"),
+]
+
+# Language -> (regular candidates, bold candidates)
+LANGUAGE_FONTS = {
+    "hi": (DEVANAGARI_CANDIDATES, DEVANAGARI_CANDIDATES),
+}
+
 CODE_COLORS = {
     Token.Keyword: (198, 149, 255),
     Token.Keyword.Type: (94, 234, 212),
@@ -61,18 +74,29 @@ def _first_existing(candidates: list[Path]) -> Path | None:
 
 class Fonts:
     def __init__(self) -> None:
-        self.sans = _first_existing(SANS_CANDIDATES)
-        self.bold = _first_existing(SANS_BOLD_CANDIDATES) or self.sans
-        self.mono = _first_existing(MONO_CANDIDATES)
         self._cache: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
+        self.set_language("en")
+
+    def set_language(self, language: str) -> None:
+        sans_candidates, bold_candidates = LANGUAGE_FONTS.get(
+            language, (SANS_CANDIDATES, SANS_BOLD_CANDIDATES)
+        )
+        self.sans = _first_existing(sans_candidates) or _first_existing(SANS_CANDIDATES)
+        self.bold = _first_existing(bold_candidates) or self.sans
+        self.mono = _first_existing(MONO_CANDIDATES)
+        self._cache.clear()
 
     def get(self, family: str, size: int) -> ImageFont.FreeTypeFont:
         key = (family, size)
         if key not in self._cache:
             path = {"sans": self.sans, "bold": self.bold, "mono": self.mono}[family]
-            self._cache[key] = (
-                ImageFont.truetype(str(path), size) if path else ImageFont.load_default(size)
-            )
+            if path is None:
+                font = ImageFont.load_default(size)
+            else:
+                # TrueType collections keep Bold at face index 1.
+                index = 1 if family == "bold" and path.suffix.lower() == ".ttc" else 0
+                font = ImageFont.truetype(str(path), size, index=index)
+            self._cache[key] = font
         return self._cache[key]
 
 
@@ -307,6 +331,7 @@ def render_section(section: Section, width: int, height: int) -> Image.Image:
 
 
 def render_all(script: VideoScript, out_dir: Path, width: int = 1920, height: int = 1080) -> list[Path]:
+    FONTS.set_language(script.language)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for section in script.sections:
