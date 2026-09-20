@@ -21,6 +21,17 @@ MUTED = (139, 158, 189)
 ACCENT = (56, 189, 248)
 ACCENT_2 = (250, 204, 21)
 
+# Smallest legible code size at 1080p; below this we scroll instead of shrink.
+MIN_CODE_SIZE = 17
+MAX_CODE_SIZE = 30
+
+# Difficulty chips get their own (background, text) colours on the title slide.
+DIFFICULTY_COLORS = {
+    "easy": ((22, 78, 62), (110, 231, 183)),
+    "medium": ((80, 62, 16), (252, 211, 77)),
+    "hard": ((88, 32, 40), (252, 165, 165)),
+}
+
 SANS_CANDIDATES = [
     MODELS_DIR / "fonts" / "Inter-Regular.ttf",
     Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
@@ -145,6 +156,57 @@ def _tokenize(code: str, language: str) -> list[list[tuple[str, tuple[int, int, 
     return lines
 
 
+def _wrap_tokens(
+    token_line: list[tuple[str, tuple[int, int, int]]], max_chars: int
+) -> list[list[tuple[str, tuple[int, int, int]]]]:
+    """Soft-wrap one syntax-highlighted source line into visual rows."""
+    if sum(len(text) for text, _ in token_line) <= max_chars:
+        return [token_line or [("", FG)]]
+
+    rows: list[list[tuple[str, tuple[int, int, int]]]] = [[]]
+    used = 0
+    for text, color in token_line:
+        pos = 0
+        while pos < len(text):
+            if used >= max_chars:
+                rows.append([("  ", FG)])  # continuation indent
+                used = 2
+            piece = text[pos : pos + (max_chars - used)]
+            rows[-1].append((piece, color))
+            pos += len(piece)
+            used += len(piece)
+    return rows
+
+
+def _visible_window(rows_per_line: list[int], highlight: set[int], budget: int) -> tuple[int, int]:
+    """Pick the 0-based line range to show, centred on the highlighted lines."""
+    total = len(rows_per_line)
+    if sum(rows_per_line) <= budget:
+        return 0, total - 1
+
+    marked = sorted(n - 1 for n in highlight if 1 <= n <= total)
+    first = marked[0] if marked else 0
+    last = marked[-1] if marked else 0
+    used = sum(rows_per_line[first : last + 1])
+
+    # Grow outwards, preferring context above so the signature stays visible.
+    while used < budget and (first > 0 or last < total - 1):
+        if first > 0 and used + rows_per_line[first - 1] <= budget:
+            first -= 1
+            used += rows_per_line[first]
+        elif last < total - 1 and used + rows_per_line[last + 1] <= budget:
+            last += 1
+            used += rows_per_line[last]
+        else:
+            break
+
+    # A highlight taller than the budget still has to be clipped somewhere.
+    while used > budget and last > first:
+        used -= rows_per_line[last]
+        last -= 1
+    return first, last
+
+
 # --------------------------------------------------------------------------
 # Chrome
 # --------------------------------------------------------------------------
@@ -187,33 +249,71 @@ def _draw_header(draw, section: Section, width: int) -> int:
 
 def _render_title(section: Section, width: int, height: int) -> Image.Image:
     image, draw = _new_canvas(width, height)
-    draw.rounded_rectangle([96, 180, width - 96, height - 180], radius=36, fill=PANEL)
+    pad = 96
+    inner = width - 2 * pad - 160
 
-    title_font = FONTS.get("bold", 84)
-    lines = _wrap(draw, section.heading, title_font, width - 320)
-    y = 300
-    for line in lines[:3]:
+    for title_size in (88, 78, 68, 58, 50, 44, 38):
+        title_font = FONTS.get("bold", title_size)
+        title_lines = _wrap(draw, section.heading, title_font, inner)
+        if len(title_lines) <= 3:
+            break
+
+    sub_lines: list[str] = []
+    sub_size = 36
+    if section.subheading:
+        for sub_size in (40, 36, 32, 28, 24):
+            sub_font = FONTS.get("sans", sub_size)
+            sub_lines = _wrap(draw, section.subheading, sub_font, inner)
+            if len(sub_lines) <= 3:
+                break
+
+    chip_font = FONTS.get("bold", 28)
+    chip_rows: list[list[tuple[str, float]]] = []
+    row: list[tuple[str, float]] = []
+    row_width = 0.0
+    for bullet in section.bullets:
+        chip_width = draw.textlength(bullet, font=chip_font) + 52
+        if row and row_width + chip_width + 20 > inner:
+            chip_rows.append(row)
+            row, row_width = [], 0.0
+        row.append((bullet, chip_width))
+        row_width += chip_width + 20
+    if row:
+        chip_rows.append(row)
+
+    title_h = len(title_lines) * int(title_size * 1.18)
+    sub_h = len(sub_lines) * int(sub_size * 1.4)
+    chips_h = len(chip_rows) * 74
+    total = title_h + (34 + sub_h if sub_lines else 0) + (44 + chips_h if chip_rows else 0)
+
+    # Size the card to the content instead of leaving a large empty band.
+    vpad = 120
+    panel_top = max(120, (height - total - 2 * vpad) // 2)
+    panel_bottom = height - panel_top
+    draw.rounded_rectangle([pad, panel_top, width - pad, panel_bottom], radius=36, fill=PANEL)
+
+    y = panel_top + (panel_bottom - panel_top - total) / 2
+    for line in title_lines[:3]:
         draw.text(((width - draw.textlength(line, font=title_font)) / 2, y), line, font=title_font, fill=FG)
-        y += 104
+        y += int(title_size * 1.18)
 
-    sub_font = FONTS.get("sans", 40)
-    draw.text(
-        ((width - draw.textlength(section.subheading, font=sub_font)) / 2, y + 20),
-        section.subheading,
-        font=sub_font,
-        fill=ACCENT,
-    )
+    if sub_lines:
+        y += 34
+        for line in sub_lines:
+            draw.text(((width - draw.textlength(line, font=sub_font)) / 2, y), line, font=sub_font, fill=ACCENT)
+            y += int(sub_size * 1.4)
 
-    if section.bullets:
-        chip_font = FONTS.get("bold", 30)
-        widths = [draw.textlength(b, font=chip_font) + 52 for b in section.bullets]
-        total = sum(widths) + 20 * (len(widths) - 1)
-        x = (width - total) / 2
-        cy = y + 130
-        for bullet, w in zip(section.bullets, widths):
-            draw.rounded_rectangle([x, cy, x + w, cy + 58], radius=29, fill=PANEL_HI)
-            draw.text((x + 26, cy + 13), bullet, font=chip_font, fill=MUTED)
-            x += w + 20
+    if chip_rows:
+        y += 44
+        for chip_row in chip_rows:
+            total_w = sum(w for _, w in chip_row) + 20 * (len(chip_row) - 1)
+            x = (width - total_w) / 2
+            for text, chip_width in chip_row:
+                fill, text_color = DIFFICULTY_COLORS.get(text.lower(), (PANEL_HI, MUTED))
+                draw.rounded_rectangle([x, y, x + chip_width, y + 58], radius=29, fill=fill)
+                draw.text((x + 26, y + 13), text, font=chip_font, fill=text_color)
+                x += chip_width + 20
+            y += 74
     return image
 
 
@@ -224,7 +324,7 @@ def _render_bullets(section: Section, width: int, height: int) -> Image.Image:
     max_width = width - 260
     bullets = [str(b).lstrip("•-* ").strip() for b in section.bullets]
 
-    for size in (42, 38, 34, 30, 26, 22):
+    for size in (42, 38, 34, 30, 26, 23, 20, 18):
         font = FONTS.get("sans", size)
         wrapped = [_wrap(draw, b, font, max_width) for b in bullets]
         line_h = int(size * 1.45)
@@ -234,6 +334,8 @@ def _render_bullets(section: Section, width: int, height: int) -> Image.Image:
 
     y = top
     for wrapped_bullet in wrapped:
+        if y + len(wrapped_bullet) * line_h > height - 60:
+            break
         draw.ellipse([96, y + line_h / 2 - 7, 110, y + line_h / 2 + 7], fill=ACCENT)
         for line in wrapped_bullet:
             draw.text((140, y), line, font=font, fill=FG)
@@ -279,34 +381,50 @@ def _render_code(section: Section, width: int, height: int) -> Image.Image:
     ref = 30
     char_w = draw.textlength("M" * 20, font=FONTS.get("mono", ref)) / 20 / ref
     longest = max((len(line) for line in lines), default=1)
-    size = 30
-    while size > 11 and (
-        len(lines) * int(size * 1.4) > available or longest * char_w * size > usable_width
-    ):
-        size -= 1
-    font = FONTS.get("mono", size)
+    size = int(usable_width / (char_w * max(longest, 1)))
+    size = max(MIN_CODE_SIZE, min(MAX_CODE_SIZE, size))
     line_h = int(size * 1.4)
-    gutter_font = FONTS.get("mono", max(11, size - 4))
+    max_chars = max(20, int(usable_width / (char_w * size)))
+    row_budget = max(4, available // line_h)
 
-    panel_bottom = min(height - 50, top + len(lines) * line_h + 40)
+    tokens = _tokenize("\n".join(lines), section.language)[: len(lines)]
+    highlight = set(section.highlight)
+    rows_per_line = [len(_wrap_tokens(t, max_chars)) for t in tokens]
+
+    first, last = _visible_window(rows_per_line, highlight, row_budget)
+    hidden_above, hidden_below = first, len(lines) - 1 - last
+
+    shown = sum(rows_per_line[first : last + 1])
+    panel_bottom = min(height - 50, top + shown * line_h + 40)
     draw.rounded_rectangle([96, top, width - 96, panel_bottom], radius=20, fill=PANEL)
 
-    tokens = _tokenize("\n".join(lines), section.language)
-    highlight = set(section.highlight)
+    gutter_font = FONTS.get("mono", max(11, size - 4))
+    font = FONTS.get("mono", size)
     y = top + 20
-    for number, token_line in enumerate(tokens[: len(lines)], start=1):
-        if number in highlight:
-            draw.rectangle([112, y - 4, width - 112, y + line_h - 4], fill=PANEL_HI)
-            draw.rectangle([112, y - 4, 118, y + line_h - 4], fill=ACCENT_2)
-        draw.text((140, y + 2), f"{number:>3}", font=gutter_font, fill=(80, 96, 124))
-        x = text_left
-        dim = number not in highlight and highlight
-        for text, color in token_line:
-            if dim:
-                color = tuple(int(c * 0.45 + 30) for c in color)
-            draw.text((x, y), text, font=font, fill=color)
-            x += draw.textlength(text, font=font)
-        y += line_h
+    for index in range(first, last + 1):
+        number = index + 1
+        for row_i, token_row in enumerate(_wrap_tokens(tokens[index], max_chars)):
+            if number in highlight:
+                draw.rectangle([112, y - 4, width - 112, y + line_h - 4], fill=PANEL_HI)
+                draw.rectangle([112, y - 4, 118, y + line_h - 4], fill=ACCENT_2)
+            if row_i == 0:
+                draw.text((140, y + 2), f"{number:>3}", font=gutter_font, fill=(80, 96, 124))
+            x = text_left
+            dim = number not in highlight and bool(highlight)
+            for text, color in token_row:
+                if dim:
+                    color = tuple(int(c * 0.45 + 30) for c in color)
+                draw.text((x, y), text, font=font, fill=color)
+                x += draw.textlength(text, font=font)
+            y += line_h
+
+    hint_font = FONTS.get("sans", 24)
+    if hidden_above:
+        draw.text((140, top - 32), f"\u2191 {hidden_above} more lines above", font=hint_font, fill=MUTED)
+    if hidden_below:
+        draw.text(
+            (140, panel_bottom + 6), f"\u2193 {hidden_below} more lines below", font=hint_font, fill=MUTED
+        )
     return image
 
 
@@ -338,4 +456,8 @@ def render_all(script: VideoScript, out_dir: Path, width: int = 1920, height: in
         path = out_dir / f"{section.id}.png"
         render_section(section, width, height).save(path)
         paths.append(path)
+
+    # Slide counts change when sections repaginate; drop frames from older runs.
+    for stale in set(out_dir.glob("*.png")) - set(paths):
+        stale.unlink()
     return paths

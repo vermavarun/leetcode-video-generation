@@ -12,6 +12,9 @@ from .solution import Solution
 
 MAX_CODE_CHUNKS = 4
 MIN_CHUNK_LINES = 3
+# A 1080p bullet slide stays legible up to roughly this much text.
+MAX_BULLETS_PER_SLIDE = 5
+MAX_BULLET_CHARS_PER_SLIDE = 440
 
 
 @dataclass
@@ -134,9 +137,59 @@ def _chunk_code(code: str, max_chunks: int = MAX_CODE_CHUNKS) -> list[tuple[int,
     return [(g[0], g[-1]) for g in groups]
 
 
+def _chunk_budget(code: str) -> int:
+    """Longer files need more walkthrough slides so each highlight stays readable."""
+    dense = sum(1 for line in code.splitlines() if line.strip())
+    return max(MAX_CODE_CHUNKS, min(10, -(-dense // 16)))
+
+
 def _wrap_paragraphs(paragraphs: list[str], limit: int = 5) -> list[str]:
     cleaned = [re.sub(r"\s+", " ", p).strip() for p in paragraphs if p and p.strip()]
     return cleaned[:limit]
+
+
+def _paginate(bullets: list[str]) -> list[list[str]]:
+    pages: list[list[str]] = []
+    current: list[str] = []
+    chars = 0
+    for bullet in bullets:
+        length = len(str(bullet))
+        if current and (len(current) >= MAX_BULLETS_PER_SLIDE or chars + length > MAX_BULLET_CHARS_PER_SLIDE):
+            pages.append(current)
+            current, chars = [], 0
+        current.append(bullet)
+        chars += length
+    if current:
+        pages.append(current)
+    return pages or [[]]
+
+
+def _bullet_sections(
+    section_id: str,
+    heading: str,
+    bullets: list[str],
+    footer: str,
+    *,
+    subheading: str = "",
+    lead: str = "",
+) -> list[Section]:
+    """One bullets section, split across slides when the text is too long."""
+    pages = _paginate(bullets)
+    sections = []
+    for i, page in enumerate(pages, start=1):
+        suffix = "" if len(pages) == 1 else f" ({i}/{len(pages)})"
+        sections.append(
+            Section(
+                id=section_id if len(pages) == 1 else f"{section_id}-{i}",
+                kind="bullets",
+                heading=heading,
+                subheading=(subheading + suffix).strip(),
+                bullets=page,
+                narration=join_speech([lead if i == 1 else "", *page]),
+                footer=footer,
+            )
+        )
+    return sections
 
 
 # --------------------------------------------------------------------------
@@ -163,13 +216,15 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
         return text if len(text) > 40 else default
 
     # 1. Title -------------------------------------------------------------
+    # The approach field often carries a trailing explanation; the slide only needs the name.
+    approach_name = re.split(r"\s[-\u2013:]\s", sol.approach or "", maxsplit=1)[0].strip()
     sections.append(
         Section(
             id="00-title",
             kind="title",
             heading=display_title,
-            subheading=f"{difficulty}  •  {sol.approach or 'Solution walkthrough'}",
-            bullets=topics[:6],
+            subheading=approach_name or "Solution walkthrough",
+            bullets=[difficulty, *topics[:5]],
             narration=polish(
                 join_speech(
                     [
@@ -189,22 +244,18 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
     )
 
     # 2. Problem statement -------------------------------------------------
-    paragraphs = _wrap_paragraphs(problem.paragraphs)
+    paragraphs = _wrap_paragraphs(problem.paragraphs, limit=8)
     if paragraphs:
-        sections.append(
-            Section(
-                id="01-problem",
-                kind="bullets",
-                heading="The Problem",
-                bullets=paragraphs,
-                narration=polish(
-                    join_speech(paragraphs),
-                    "Read this LeetCode problem statement out loud as narration: " + " ".join(paragraphs),
-                    260,
-                ),
-                footer="Problem Introduction",
-            )
+        problem_sections = _bullet_sections(
+            "01-problem", "The Problem", paragraphs, "Problem Introduction"
         )
+        if len(problem_sections) == 1:
+            problem_sections[0].narration = polish(
+                problem_sections[0].narration,
+                "Read this LeetCode problem statement out loud as narration: " + " ".join(paragraphs),
+                260,
+            )
+        sections.extend(problem_sections)
 
     # 3. Examples ----------------------------------------------------------
     for i, example in enumerate(problem.examples[:2], start=1):
@@ -232,45 +283,42 @@ def build_script(problem: Problem, sol: Solution, llm=None) -> VideoScript:
 
     # 4. Constraints -------------------------------------------------------
     if problem.constraints:
-        constraints = problem.constraints[:6]
-        sections.append(
-            Section(
-                id="03-constraints",
-                kind="bullets",
-                heading="Constraints",
-                bullets=constraints,
-                narration=join_speech(["Now the constraints.", *constraints]),
-                footer="Problem Introduction",
+        sections.extend(
+            _bullet_sections(
+                "03-constraints",
+                "Constraints",
+                problem.constraints[:8],
+                "Problem Introduction",
+                lead="Now the constraints.",
             )
         )
 
     # 5. Approach ----------------------------------------------------------
     if sol.steps:
-        sections.append(
-            Section(
-                id="04-approach",
-                kind="bullets",
-                heading=sol.approach or "Approach",
-                subheading="Step by step",
-                bullets=sol.steps,
-                narration=polish(
-                    join_speech(
-                        [
-                            f"Here is the idea behind the {sol.approach} approach." if sol.approach else "Here is the idea.",
-                            *sol.steps,
-                        ]
-                    ),
-                    f"Explain this algorithm as narration. Approach name: {sol.approach}. Steps: "
-                    + " ".join(f"{i}. {s}" for i, s in enumerate(sol.steps, 1)),
-                    280,
-                ),
-                footer="Solution",
-            )
+        approach_sections = _bullet_sections(
+            "04-approach",
+            sol.approach or "Approach",
+            sol.steps,
+            "Solution",
+            subheading="Step by step",
+            lead=(
+                f"Here is the idea behind the {sol.approach} approach."
+                if sol.approach
+                else "Here is the idea."
+            ),
         )
+        if len(approach_sections) == 1:
+            approach_sections[0].narration = polish(
+                approach_sections[0].narration,
+                f"Explain this algorithm as narration. Approach name: {sol.approach}. Steps: "
+                + " ".join(f"{i}. {s}" for i, s in enumerate(sol.steps, 1)),
+                280,
+            )
+        sections.extend(approach_sections)
 
     # 6. Code walkthrough --------------------------------------------------
     code_lines = sol.code.splitlines()
-    chunks = _chunk_code(sol.code)
+    chunks = _chunk_code(sol.code, _chunk_budget(sol.code))
     for i, (start, end) in enumerate(chunks, start=1):
         window = code_lines[start - 1 : end]
         comments = _comments_in(window)
