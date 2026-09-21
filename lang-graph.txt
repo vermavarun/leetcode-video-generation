@@ -1,0 +1,2 @@
+1) python -m src.main --show-graph // to display graph
+2) python -m src.main 0019

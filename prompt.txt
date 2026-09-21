@@ -1,9 +1,0 @@
-I need to create video of leetcode code explanation.
-I will provide source code file of the problem
-you need to generate explanation script
-then images for the video
-then the video
-
-Video should have these sections
-1) Problem Introduction
-2) Solution

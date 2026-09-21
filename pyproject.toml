@@ -1,0 +1,21 @@
+[project]
+name = "langgraph-starter"
+version = "0.1.0"
+description = "A small LangGraph starter project"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-ollama>=0.3.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+langgraph-starter = "src.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

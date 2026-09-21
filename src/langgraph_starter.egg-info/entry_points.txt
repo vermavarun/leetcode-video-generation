@@ -1,0 +1,2 @@
+[console_scripts]
+langgraph-starter = src.main:main
