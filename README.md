@@ -1,6 +1,6 @@
 # LangGraph Starter
 
-A tiny LangGraph project that fetches an official LeetCode question and a solution from the configured web app. It is intentionally small so the graph structure is easy to extend with Ollama-backed nodes.
+A tiny LangGraph project that fetches an official LeetCode question and a solution, then creates a casual teaching narration with Ollama. It is intentionally small so the graph structure is easy to extend.
 
 ## Setup
 
@@ -30,10 +30,10 @@ SOLUTIONS_WEB_APP=https://vermavarun.github.io/coding/
 python -m src.main 0019
 ```
 
-This prints the official question statement and examples from LeetCode, saves a rendered description snapshot under `artifacts/questions/`, and then prints the structured solution fetched from `solutions.json`. The current graph is:
+This prints the official question statement and examples from LeetCode, saves a rendered description snapshot under `artifacts/questions/`, fetches the structured solution from `solutions.json`, saves the Ollama narration under `artifacts/explanations/`, and creates video-ready PNG slides under `artifacts/demonstration/<problem>/`. The slides include an introduction, problem statement, examples, wrapped and highlighted code parts, and a conclusion. The current graph is:
 
 ```text
-START -> fetch_question -> fetch_solution -> END
+START -> fetch_question -> fetch_solution -> generate_explanation -> create_demonstration_images -> END
 ```
 
 Print the graph as Mermaid text with:

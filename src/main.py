@@ -11,12 +11,14 @@ from typing import TypedDict
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
+from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from playwright.sync_api import sync_playwright
 
 
 load_dotenv()
 SOLUTIONS_WEB_APP = os.getenv("SOLUTIONS_WEB_APP")
+DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 
 class GraphState(TypedDict):
@@ -26,6 +28,9 @@ class GraphState(TypedDict):
     question_snapshot: str
     solution_url: str
     solution: str
+    explanation: str
+    explanation_path: str
+    demonstration_images: list[str]
 
 
 def fetch_page(url: str) -> str:
@@ -225,18 +230,194 @@ def fetch_question_node(state: GraphState) -> GraphState:
     }
 
 
-def build_graph():
+def generate_explanation(
+    problem_number: str,
+    question: str,
+    solution: str,
+    model: str = DEFAULT_MODEL,
+) -> tuple[str, str]:
+    prompt = f"""You are a friendly coding teacher writing a narration for a short video.
+
+Explain LeetCode problem {problem_number} using the source material below.
+Write in a casual, clear teaching tone, as if speaking directly to a learner.
+Cover these sections:
+1. What the problem is asking, including the important constraints and examples.
+2. The key insight behind the solution.
+3. A step-by-step walkthrough of the provided code.
+4. Time and space complexity.
+5. A short closing takeaway.
+
+Do not invent requirements, examples, or behavior that are not present in the source.
+Use Markdown headings and paragraphs. Keep the explanation focused and understandable.
+
+QUESTION:
+{question}
+
+SOLUTION:
+{solution}
+"""
+    response = ChatOllama(model=model, temperature=0.2).invoke(prompt)
+    explanation = str(response.content).strip()
+    output_dir = Path(os.getenv("EXPLANATION_DIR", "artifacts/explanations"))
+    output_path = output_dir / f"{int(problem_number):04d}.md"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(explanation + "\n", encoding="utf-8")
+    return str(output_path), explanation
+
+
+def generate_explanation_node(state: GraphState, model: str) -> GraphState:
+    explanation_path, explanation = generate_explanation(
+        state["problem_number"], state["question"], state["solution"], model
+    )
+    return {"explanation_path": explanation_path, "explanation": explanation}
+
+
+def _slide_paragraphs(text: str, limit: int = 5) -> str:
+    paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
+    return "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs[:limit])
+
+
+def _render_slide(page, output_path: Path, title: str, body: str, code: bool = False) -> None:
+    page.set_content(
+        f"""
+        <style>
+            * {{ box-sizing: border-box; }}
+            body {{ margin: 0; width: 1280px; height: 720px; background: #16181d;
+                    color: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", sans-serif; }}
+            main {{ width: 100%; height: 100%; padding: 58px 72px; display: flex;
+                    flex-direction: column; justify-content: center; }}
+            .eyebrow {{ color: #f0b429; text-transform: uppercase; letter-spacing: 1px;
+                        font-size: 16px; font-weight: 700; margin-bottom: 18px; }}
+            h1 {{ max-width: 1100px; margin: 0 0 30px; font-size: 46px; line-height: 1.1; }}
+            .body {{ max-width: 1100px; font-size: 27px; line-height: 1.42; }}
+            .body p {{ margin: 0 0 20px; }}
+            .body code {{ background: #30343c; border-radius: 5px; padding: 2px 7px;
+                          font-family: "SFMono-Regular", Consolas, monospace; font-size: .82em; }}
+            .body pre {{ margin: 0; color: #e8edf2; font-family: "SFMono-Regular", Consolas,
+                         monospace; font-size: 20px; line-height: 1.38; white-space: pre-wrap;
+                         overflow-wrap: anywhere; }}
+            .code {{ justify-content: flex-start; padding-top: 46px; }}
+            .code h1 {{ font-size: 34px; margin-bottom: 22px; }}
+            .line {{ display: block; padding: 1px 12px; }}
+            .active {{ background: #5a4518; border-left: 4px solid #f0b429; }}
+            .footer {{ margin-top: auto; color: #8f98a8; font-size: 15px; }}
+        </style>
+        <main class="{'code' if code else ''}">
+            <div class="eyebrow">LeetCode video</div>
+            <h1>{html.escape(title)}</h1>
+            <section class="body">{body}</section>
+            <div class="footer">Local learning narration</div>
+        </main>
+        """
+    )
+    page.screenshot(path=str(output_path), type="png")
+
+
+def _extract_solution_code(solution: str) -> str:
+    code = solution.split("Code:\n", 1)[1] if "Code:\n" in solution else solution
+    code = code.strip()
+    while code.startswith("/*") and "*/" in code:
+        code = code.split("*/", 1)[1].lstrip()
+    return code
+
+
+def create_demonstration_images(
+    problem_number: str,
+    question: str,
+    solution: str,
+    explanation: str,
+) -> list[str]:
+    output_dir = Path(os.getenv("DEMONSTRATION_DIR", "artifacts/demonstration"))
+    problem_dir = output_dir / f"{int(problem_number):04d}"
+    problem_dir.mkdir(parents=True, exist_ok=True)
+    for old_image in problem_dir.glob("*.png"):
+        old_image.unlink()
+
+    question_lines = question.splitlines()
+    question_title = question_lines[0] if question_lines else f"Problem {problem_number}"
+    question_body = "\n".join(question_lines[1:])
+    example_match = re.search(r"(?im)^Example 1:", question_body)
+    statement = question_body[: example_match.start()] if example_match else question_body
+    examples = question_body[example_match.start() :] if example_match else "Examples are included in the problem statement."
+    code = _extract_solution_code(solution)
+    code_lines = code.strip().splitlines() or ["No solution code was provided."]
+    code_chunks = [code_lines[index : index + 24] for index in range(0, len(code_lines), 24)]
+
+    image_paths: list[str] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=1)
+
+            slides = [
+                ("001-introduction.png", question_title, _slide_paragraphs(explanation, 2), False),
+                ("002-problem-statement.png", "What are we being asked to do?", _slide_paragraphs(statement, 4), False),
+                ("003-examples.png", "Examples", _slide_paragraphs(examples, 5), False),
+            ]
+            for filename, title, body, is_code in slides:
+                path = problem_dir / filename
+                _render_slide(page, path, title, body, is_code)
+                image_paths.append(str(path))
+
+            for part_number, chunk in enumerate(code_chunks, start=1):
+                lines = "".join(
+                    f'<span class="line active">{html.escape(line) or " "}</span>\n'
+                    for line in chunk
+                )
+                path = problem_dir / f"004-solution-code-part-{part_number:02d}.png"
+                _render_slide(
+                    page,
+                    path,
+                    f"Solution code | Part {part_number} of {len(code_chunks)}",
+                    f"<pre>{lines}</pre>",
+                    True,
+                )
+                image_paths.append(str(path))
+
+            conclusion = explanation.split("Closing Takeaway", 1)[-1]
+            conclusion_number = 4 + len(code_chunks)
+            path = problem_dir / f"{conclusion_number:03d}-conclusion.png"
+            _render_slide(page, path, "The takeaway", _slide_paragraphs(conclusion, 3), False)
+            image_paths.append(str(path))
+        finally:
+            browser.close()
+
+    return image_paths
+
+
+def create_demonstration_images_node(state: GraphState) -> GraphState:
+    images = create_demonstration_images(
+        state["problem_number"],
+        state["question"],
+        state["solution"],
+        state["explanation"],
+    )
+    return {"demonstration_images": images}
+
+
+def build_graph(model: str = DEFAULT_MODEL):
     graph = StateGraph(GraphState)
     graph.add_node("fetch_question", fetch_question_node)
     graph.add_node("fetch_solution", fetch_solution_node)
+    graph.add_node(
+        "generate_explanation",
+        lambda state: generate_explanation_node(state, model),
+    )
+    graph.add_node("create_demonstration_images", create_demonstration_images_node)
     graph.add_edge(START, "fetch_question")
     graph.add_edge("fetch_question", "fetch_solution")
-    graph.add_edge("fetch_solution", END)
+    graph.add_edge("fetch_solution", "generate_explanation")
+    graph.add_edge("generate_explanation", "create_demonstration_images")
+    graph.add_edge("create_demonstration_images", END)
     return graph.compile()
 
 
-def run_graph(problem_number: str) -> GraphState:
-    return build_graph().invoke(
+def run_graph(problem_number: str, model: str = DEFAULT_MODEL) -> GraphState:
+    return build_graph(model).invoke(
         {
             "problem_number": problem_number,
             "question_url": "",
@@ -244,6 +425,9 @@ def run_graph(problem_number: str) -> GraphState:
             "question_snapshot": "",
             "solution_url": "",
             "solution": "",
+            "explanation": "",
+            "explanation_path": "",
+            "demonstration_images": [],
         }
     )
 
@@ -251,6 +435,7 @@ def run_graph(problem_number: str) -> GraphState:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch a LeetCode solution with LangGraph.")
     parser.add_argument("problem_number", nargs="?", default="0019")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model to use.")
     parser.add_argument(
         "--show-graph",
         action="store_true",
@@ -258,14 +443,16 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.show_graph:
-        print(build_graph().get_graph().draw_mermaid())
+        print(build_graph(args.model).get_graph().draw_mermaid())
         return
-    result = run_graph(args.problem_number)
+    result = run_graph(args.problem_number, args.model)
     print(
         f"Question URL: {result['question_url']}\n"
         f"Question snapshot: {result['question_snapshot']}\n\n"
         f"{result['question']}\n\n"
-        f"Solution URL: {result['solution_url']}\n\n{result['solution']}"
+        f"Solution URL: {result['solution_url']}\n\n{result['solution']}\n\n"
+        f"Explanation: {result['explanation_path']}\n\n{result['explanation']}"
+        f"\n\nDemonstration images:\n" + "\n".join(result["demonstration_images"])
     )
 
 
