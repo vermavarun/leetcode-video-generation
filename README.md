@@ -10,6 +10,14 @@ Using the existing virtual environment:
 python -m pip install -e ".[dev]"
 ```
 
+Install the browser runtime once on the host or deployment image:
+
+```bash
+python -m playwright install --with-deps chromium
+```
+
+Snapshots run in headless Chromium and use container-friendly launch flags. Set `SNAPSHOT_DIR` to change the output directory.
+
 The solution source is configured in `.env`:
 
 ```bash
@@ -22,7 +30,7 @@ SOLUTIONS_WEB_APP=https://vermavarun.github.io/coding/
 python -m src.main 0019
 ```
 
-This prints the official question statement and examples from LeetCode, followed by the structured solution fetched from `solutions.json`. The current graph is:
+This prints the official question statement and examples from LeetCode, saves a rendered description snapshot under `artifacts/questions/`, and then prints the structured solution fetched from `solutions.json`. The current graph is:
 
 ```text
 START -> fetch_question -> fetch_solution -> END

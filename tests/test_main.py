@@ -7,6 +7,7 @@ def test_graph_fetches_solution(monkeypatch) -> None:
         lambda problem_number: (
             "https://leetcode.com/problems/example/",
             "19. Example question\nExample 1: input -> output",
+            "artifacts/questions/0019.png",
         ),
     )
     monkeypatch.setattr(
@@ -22,6 +23,7 @@ def test_graph_fetches_solution(monkeypatch) -> None:
             "problem_number": "0019",
             "question_url": "",
             "question": "",
+            "question_snapshot": "",
             "solution_url": "",
             "solution": "",
         }
@@ -29,5 +31,6 @@ def test_graph_fetches_solution(monkeypatch) -> None:
 
     assert result["question_url"].endswith("/example/")
     assert "Example 1" in result["question"]
+    assert result["question_snapshot"].endswith("0019.png")
     assert result["solution_url"].endswith("0019-remove.html")
     assert result["solution"] == "Remove Nth Node From End of List"

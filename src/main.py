@@ -6,11 +6,13 @@ import json
 import os
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import TypedDict
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
+from playwright.sync_api import sync_playwright
 
 
 load_dotenv()
@@ -21,6 +23,7 @@ class GraphState(TypedDict):
     problem_number: str
     question_url: str
     question: str
+    question_snapshot: str
     solution_url: str
     solution: str
 
@@ -62,7 +65,64 @@ def html_to_text(content: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(parser.parts))
 
 
-def fetch_question(problem_number: str) -> tuple[str, str]:
+def capture_question_snapshot(
+    description_html: str,
+    problem_number: str,
+    title: str,
+) -> str:
+    snapshot_dir = os.getenv("SNAPSHOT_DIR", "artifacts/questions")
+    output_path = Path(snapshot_dir) / f"{int(problem_number):04d}.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            page = browser.new_page(
+                viewport={"width": 1440, "height": 1200},
+                device_scale_factor=1,
+            )
+            page.set_content(
+                f"""
+                <style>
+                    body {{ margin: 0; background: #262626; color: #f5f5f5;
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+                    #description {{ box-sizing: border-box; width: 900px; padding: 12px 8px 32px;
+                                    font-size: 16px; line-height: 1.55; }}
+                    h1 {{ margin: 0 0 16px; font-size: 25px; line-height: 1.25; }}
+                    .badge {{ display: inline-block; border-radius: 14px; padding: 4px 10px;
+                              background: #3a3a3a; color: #f5c542; font-size: 13px; }}
+                    .content p {{ margin: 16px 0; }}
+                    .content li {{ margin: 10px 0; }}
+                    .content pre {{ border-left: 3px solid #505050; padding-left: 16px;
+                                    overflow-wrap: anywhere; white-space: pre-wrap; }}
+                    .content code {{ background: #3a3a3a; padding: 2px 4px; border-radius: 3px; }}
+                    .content img {{ display: block; max-width: 100%; height: auto; margin: 12px 0; }}
+                </style>
+                <main id="description">
+                    <h1>{int(problem_number)}. {html.escape(title)}</h1>
+                    <span class="badge">LeetCode</span>
+                    <section class="content"></section>
+                </main>
+                """
+            )
+            page.locator(".content").evaluate(
+                "(element, content) => element.innerHTML = content", description_html
+            )
+            page.wait_for_function(
+                "() => Array.from(document.images).every(image => image.complete)",
+                timeout=30_000,
+            )
+            page.locator("#description").screenshot(path=str(output_path), type="png")
+        finally:
+            browser.close()
+
+    return str(output_path)
+
+
+def fetch_question(problem_number: str) -> tuple[str, str, str]:
     if not problem_number.isdigit() or int(problem_number) < 1:
         raise ValueError("Problem number must be a positive integer, such as 0019.")
 
@@ -102,7 +162,13 @@ def fetch_question(problem_number: str) -> tuple[str, str]:
             html_to_text(question.get("content", "")),
         ]
     )
-    return f"https://leetcode.com/problems/{slug}/", question_text
+    question_url = f"https://leetcode.com/problems/{slug}/"
+    snapshot_path = capture_question_snapshot(
+        question.get("content", ""),
+        problem_number,
+        question["title"],
+    )
+    return question_url, question_text, snapshot_path
 
 
 def fetch_solution(problem_number: str, base_url: str | None = SOLUTIONS_WEB_APP) -> tuple[str, str]:
@@ -151,8 +217,12 @@ def fetch_solution_node(state: GraphState) -> GraphState:
 
 
 def fetch_question_node(state: GraphState) -> GraphState:
-    question_url, question = fetch_question(state["problem_number"])
-    return {"question_url": question_url, "question": question}
+    question_url, question, snapshot_path = fetch_question(state["problem_number"])
+    return {
+        "question_url": question_url,
+        "question": question,
+        "question_snapshot": snapshot_path,
+    }
 
 
 def build_graph():
@@ -171,6 +241,7 @@ def run_graph(problem_number: str) -> GraphState:
             "problem_number": problem_number,
             "question_url": "",
             "question": "",
+            "question_snapshot": "",
             "solution_url": "",
             "solution": "",
         }
@@ -191,7 +262,9 @@ def main() -> None:
         return
     result = run_graph(args.problem_number)
     print(
-        f"Question URL: {result['question_url']}\n\n{result['question']}\n\n"
+        f"Question URL: {result['question_url']}\n"
+        f"Question snapshot: {result['question_snapshot']}\n\n"
+        f"{result['question']}\n\n"
         f"Solution URL: {result['solution_url']}\n\n{result['solution']}"
     )
 
