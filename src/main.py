@@ -5,6 +5,7 @@ import html
 import json
 import os
 import re
+import textwrap
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import TypedDict
@@ -272,45 +273,68 @@ def generate_explanation_node(state: GraphState, model: str) -> GraphState:
     return {"explanation_path": explanation_path, "explanation": explanation}
 
 
-def _slide_paragraphs(text: str, limit: int = 5) -> str:
-    paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
+def _clean_narration(text: str) -> str:
+    text = re.sub(r"(?m)^#+\s*", "", text)
+    text = re.sub(r"(?m)^[-=]{3,}\s*$", "", text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = text.replace("`", "")
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _slide_paragraphs(text: str, limit: int = 4) -> str:
+    paragraphs = [part.strip() for part in _clean_narration(text).split("\n\n") if part.strip()]
     return "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs[:limit])
 
 
-def _render_slide(page, output_path: Path, title: str, body: str, code: bool = False) -> None:
+def _render_slide(page, output_path: Path, title: str, body: str, variant: str = "text") -> None:
     page.set_content(
         f"""
         <style>
             * {{ box-sizing: border-box; }}
-            body {{ margin: 0; width: 1280px; height: 720px; background: #16181d;
-                    color: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont,
-                    "Segoe UI", sans-serif; }}
-            main {{ width: 100%; height: 100%; padding: 58px 72px; display: flex;
-                    flex-direction: column; justify-content: center; }}
-            .eyebrow {{ color: #f0b429; text-transform: uppercase; letter-spacing: 1px;
-                        font-size: 16px; font-weight: 700; margin-bottom: 18px; }}
-            h1 {{ max-width: 1100px; margin: 0 0 30px; font-size: 46px; line-height: 1.1; }}
-            .body {{ max-width: 1100px; font-size: 27px; line-height: 1.42; }}
-            .body p {{ margin: 0 0 20px; }}
-            .body code {{ background: #30343c; border-radius: 5px; padding: 2px 7px;
-                          font-family: "SFMono-Regular", Consolas, monospace; font-size: .82em; }}
-            .body pre {{ margin: 0; color: #e8edf2; font-family: "SFMono-Regular", Consolas,
-                         monospace; font-size: 20px; line-height: 1.38; white-space: pre-wrap;
-                         overflow-wrap: anywhere; }}
-            .code {{ justify-content: flex-start; padding-top: 46px; }}
-            .code h1 {{ font-size: 34px; margin-bottom: 22px; }}
-            .line {{ display: block; padding: 1px 12px; }}
-            .active {{ background: #5a4518; border-left: 4px solid #f0b429; }}
-            .footer {{ margin-top: auto; color: #8f98a8; font-size: 15px; }}
+            body {{ margin: 0; width: 1280px; height: 720px; background: #111418;
+                    color: #f8fafc; font-family: Georgia, "Times New Roman", serif; }}
+            main {{ position: relative; width: 100%; height: 100%; padding: 52px 64px;
+                    overflow: hidden; }}
+            main::before {{ content: ""; position: absolute; inset: 0 0 auto; height: 8px;
+                             background: #e9a820; }}
+            .eyebrow {{ color: #e9a820; font-family: -apple-system, BlinkMacSystemFont,
+                        "Segoe UI", sans-serif; text-transform: uppercase; letter-spacing: 2px;
+                        font-size: 13px; font-weight: 800; margin-bottom: 13px; }}
+            h1 {{ max-width: 1080px; margin: 0 0 24px; font-family: -apple-system,
+                  BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 42px; line-height: 1.08; }}
+            .body {{ max-width: 1080px; font-size: 27px; line-height: 1.35; }}
+            .body p {{ margin: 0 0 18px; }}
+            .card {{ background: #1c222a; border: 1px solid #303a46; border-left: 5px solid #e9a820;
+                     padding: 28px 32px; border-radius: 4px; }}
+            .footer {{ position: absolute; left: 64px; bottom: 35px; color: #94a3b8;
+                       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                       font-size: 14px; }}
+            .code main {{ padding-top: 42px; }}
+            .code h1 {{ font-size: 30px; margin-bottom: 16px; }}
+            .code .body {{ max-width: none; }}
+            .code pre {{ margin: 0; padding: 16px 18px; background: #0b0e12; border: 1px solid #2b3542;
+                         color: #d8e1ec; font-family: "SFMono-Regular", Consolas, monospace;
+                         font-size: 18px; line-height: 1.32; white-space: pre-wrap; overflow-wrap: anywhere; }}
+            .line {{ display: block; min-height: 24px; padding: 0 10px; }}
+            .line:nth-child(3n+1) {{ background: rgba(233, 168, 32, .12); border-left: 3px solid #e9a820; }}
+            .snapshot main {{ display: grid; grid-template-columns: 1fr 1.18fr; gap: 36px; align-items: center; }}
+            .snapshot h1 {{ font-size: 46px; }}
+            .snapshot .body {{ font-size: 24px; }}
+            .snapshot-frame {{ height: 590px; padding: 12px; background: #1c222a; border: 1px solid #3a4655; }}
+            .snapshot-frame img {{ width: 100%; height: 100%; object-fit: contain; object-position: center; }}
         </style>
-        <main class="{'code' if code else ''}">
+        <main>
             <div class="eyebrow">LeetCode video</div>
             <h1>{html.escape(title)}</h1>
-            <section class="body">{body}</section>
-            <div class="footer">Local learning narration</div>
+            <section class="body {'card' if variant == 'text' else ''}">{body}</section>
+            <div class="footer">Algorithm notes for video narration</div>
         </main>
         """
     )
+    if variant == "code":
+        page.locator("body").evaluate("element => element.classList.add('code')")
+    if variant == "snapshot":
+        page.locator("body").evaluate("element => element.classList.add('snapshot')")
     page.screenshot(path=str(output_path), type="png")
 
 
@@ -322,9 +346,35 @@ def _extract_solution_code(solution: str) -> str:
     return code
 
 
+def _split_code_for_slides(code: str) -> list[list[str]]:
+    lines = code.splitlines() or ["No solution code was provided."]
+    visual_lines = [max(1, (len(line.expandtabs(4)) + 68) // 69) for line in lines]
+    total_visual_lines = sum(visual_lines)
+    if len(lines) > 8:
+        target_parts = max(2, (total_visual_lines + 13) // 14)
+    else:
+        target_parts = 1
+    max_visual_lines = max(8, (total_visual_lines + target_parts - 1) // target_parts)
+
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_height = 0
+    for line, height in zip(lines, visual_lines):
+        if current and current_height + height > max_visual_lines:
+            chunks.append(current)
+            current = []
+            current_height = 0
+        current.append(line)
+        current_height += height
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def create_demonstration_images(
     problem_number: str,
     question: str,
+    question_snapshot: str,
     solution: str,
     explanation: str,
 ) -> list[str]:
@@ -341,8 +391,7 @@ def create_demonstration_images(
     statement = question_body[: example_match.start()] if example_match else question_body
     examples = question_body[example_match.start() :] if example_match else "Examples are included in the problem statement."
     code = _extract_solution_code(solution)
-    code_lines = code.strip().splitlines() or ["No solution code was provided."]
-    code_chunks = [code_lines[index : index + 24] for index in range(0, len(code_lines), 24)]
+    code_chunks = _split_code_for_slides(code.strip())
 
     image_paths: list[str] = []
     with sync_playwright() as playwright:
@@ -354,13 +403,18 @@ def create_demonstration_images(
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=1)
 
             slides = [
-                ("001-introduction.png", question_title, _slide_paragraphs(explanation, 2), False),
-                ("002-problem-statement.png", "What are we being asked to do?", _slide_paragraphs(statement, 4), False),
-                ("003-examples.png", "Examples", _slide_paragraphs(examples, 5), False),
+                ("001-introduction.png", question_title, _slide_paragraphs(explanation, 2), "text"),
+                (
+                    "002-problem-statement.png",
+                    "The actual problem statement",
+                    f"<div class=\"snapshot-frame\"><img src=\"{html.escape(question_snapshot)}\"></div>",
+                    "snapshot",
+                ),
+                ("003-examples.png", "Examples to keep in mind", _slide_paragraphs(examples, 3), "text"),
             ]
-            for filename, title, body, is_code in slides:
+            for filename, title, body, variant in slides:
                 path = problem_dir / filename
-                _render_slide(page, path, title, body, is_code)
+                _render_slide(page, path, title, body, variant)
                 image_paths.append(str(path))
 
             for part_number, chunk in enumerate(code_chunks, start=1):
@@ -374,14 +428,14 @@ def create_demonstration_images(
                     path,
                     f"Solution code | Part {part_number} of {len(code_chunks)}",
                     f"<pre>{lines}</pre>",
-                    True,
+                    "code",
                 )
                 image_paths.append(str(path))
 
             conclusion = explanation.split("Closing Takeaway", 1)[-1]
             conclusion_number = 4 + len(code_chunks)
             path = problem_dir / f"{conclusion_number:03d}-conclusion.png"
-            _render_slide(page, path, "The takeaway", _slide_paragraphs(conclusion, 3), False)
+            _render_slide(page, path, "The takeaway", _slide_paragraphs(conclusion, 3), "text")
             image_paths.append(str(path))
         finally:
             browser.close()
@@ -393,6 +447,7 @@ def create_demonstration_images_node(state: GraphState) -> GraphState:
     images = create_demonstration_images(
         state["problem_number"],
         state["question"],
+        state["question_snapshot"],
         state["solution"],
         state["explanation"],
     )

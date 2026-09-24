@@ -82,3 +82,14 @@ def test_graph_generates_explanation(monkeypatch, tmp_path) -> None:
     assert result["explanation_path"].endswith("0019.md")
     assert result["explanation"] == FakeResponse.content
     assert (tmp_path / "0019.md").read_text(encoding="utf-8").strip() == FakeResponse.content
+
+
+def test_code_is_split_for_readable_slides() -> None:
+    from src.main import _split_code_for_slides
+
+    code = "\n".join(f"    ProcessValue(values[{index}]);" for index in range(12))
+
+    chunks = _split_code_for_slides(code)
+
+    assert len(chunks) >= 2
+    assert [line for chunk in chunks for line in chunk] == code.splitlines()
