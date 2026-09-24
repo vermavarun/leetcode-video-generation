@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import json
 import os
@@ -317,11 +318,14 @@ def _render_slide(page, output_path: Path, title: str, body: str, variant: str =
                          font-size: 18px; line-height: 1.32; white-space: pre-wrap; overflow-wrap: anywhere; }}
             .line {{ display: block; min-height: 24px; padding: 0 10px; }}
             .line:nth-child(3n+1) {{ background: rgba(233, 168, 32, .12); border-left: 3px solid #e9a820; }}
-            .snapshot main {{ display: grid; grid-template-columns: 1fr 1.18fr; gap: 36px; align-items: center; }}
-            .snapshot h1 {{ font-size: 46px; }}
-            .snapshot .body {{ font-size: 24px; }}
-            .snapshot-frame {{ height: 590px; padding: 12px; background: #1c222a; border: 1px solid #3a4655; }}
-            .snapshot-frame img {{ width: 100%; height: 100%; object-fit: contain; object-position: center; }}
+            .snapshot main {{ display: flex; flex-direction: column; }}
+            .snapshot h1 {{ font-size: 34px; margin-bottom: 20px; }}
+            .snapshot .body {{ flex: 1; min-height: 0; max-width: none; }}
+            .snapshot .footer {{ display: none; }}
+            .snapshot-frame {{ width: 100%; height: 100%; padding: 16px; background: #1c222a;
+                                border: 1px solid #3a4655; display: flex; align-items: center;
+                                justify-content: center; overflow: hidden; }}
+            .snapshot-frame img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
         </style>
         <main>
             <div class="eyebrow">LeetCode video</div>
@@ -335,7 +339,20 @@ def _render_slide(page, output_path: Path, title: str, body: str, variant: str =
         page.locator("body").evaluate("element => element.classList.add('code')")
     if variant == "snapshot":
         page.locator("body").evaluate("element => element.classList.add('snapshot')")
+        page.wait_for_function(
+            "() => Array.from(document.images).every(image => "
+            "!image.getAttribute('src') || (image.complete && image.naturalWidth > 0))",
+            timeout=30_000,
+        )
     page.screenshot(path=str(output_path), type="png")
+
+
+def _image_to_data_uri(image_path: str) -> str:
+    """Embed as base64; Chromium blocks file:// loads from set_content() pages."""
+    if not image_path or not Path(image_path).exists():
+        return ""
+    encoded = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _extract_solution_code(solution: str) -> str:
@@ -402,12 +419,13 @@ def create_demonstration_images(
         try:
             page = browser.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=1)
 
+            snapshot_data_uri = _image_to_data_uri(question_snapshot)
             slides = [
                 ("001-introduction.png", question_title, _slide_paragraphs(explanation, 2), "text"),
                 (
                     "002-problem-statement.png",
                     "The actual problem statement",
-                    f"<div class=\"snapshot-frame\"><img src=\"{html.escape(question_snapshot)}\"></div>",
+                    f"<div class=\"snapshot-frame\"><img src=\"{snapshot_data_uri}\"></div>",
                     "snapshot",
                 ),
                 ("003-examples.png", "Examples to keep in mind", _slide_paragraphs(examples, 3), "text"),
