@@ -317,7 +317,6 @@ def _render_slide(page, output_path: Path, title: str, body: str, variant: str =
                          color: #d8e1ec; font-family: "SFMono-Regular", Consolas, monospace;
                          font-size: 18px; line-height: 1.32; white-space: pre-wrap; overflow-wrap: anywhere; }}
             .line {{ display: block; min-height: 24px; padding: 0 10px; }}
-            .line:nth-child(3n+1) {{ background: rgba(233, 168, 32, .12); border-left: 3px solid #e9a820; }}
             .snapshot main {{ display: flex; flex-direction: column; }}
             .snapshot h1 {{ font-size: 34px; margin-bottom: 20px; }}
             .snapshot .body {{ flex: 1; min-height: 0; max-width: none; }}
